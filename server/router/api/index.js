@@ -872,16 +872,27 @@ ApiRouter.get("/:dynamic_value/:wa_id/messages", async (req, res) => {
       };
     }
 
+    // Remove sensitive / unnecessary fields from the raw payload before returning
+    if (raw && raw.conversation) {
+      try {
+        delete raw.conversation;
+      } catch (e) {
+        // ignore
+      }
+    }
+    // Provide a normalized timestamp field but omit the original created_at
+    const timestamp = messageData.created_at || messageData.timestamp || null;
+
     return {
       id: messageData.id,
       from: messageData.from || dynamic_value,
       to: messageData.to || wa_id,
       type,
       text, // convenience
-      message: raw, // full payload
+      message: raw, // full payload (with conversation removed)
       order, // normalized order details when applicable
       template, // normalized template info when applicable
-      timestamp: messageData.created_at,
+      timestamp,
       status: messageData.status || raw?.status || "sent",
       direction: (messageData.from || raw?.from) === wa_id ? "incoming" : "outgoing",
     };

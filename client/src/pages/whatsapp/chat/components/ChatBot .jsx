@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { BiCheckDouble } from "react-icons/bi";
+import { BiCheckDouble, BiCheck } from "react-icons/bi";
 import { TbClockShare } from "react-icons/tb";
 import { VscLoading } from "react-icons/vsc";
 import { BsThreeDotsVertical } from "react-icons/bs";
@@ -21,6 +21,7 @@ import {
   ArrowDownTrayIcon,
   ShoppingCartIcon,
   ArrowPathIcon,
+  CheckIcon,
 } from "@heroicons/react/24/outline";
 import WBMessages from "@utils/WBMessages";
 import { WebhookService } from "@api/WebhookService";
@@ -30,6 +31,7 @@ import { GrLocation } from "react-icons/gr";
 import { FaRegUser } from "react-icons/fa";
 import { useSearchParams } from "react-router-dom";
 import { businessService } from "@api/businessService";
+import WbMessageStatus from "@utils/WBMessageStatus";
 
 // Utility function to format seconds as mm:ss
 const formatTime = (seconds) => {
@@ -353,8 +355,30 @@ const ChatMessage = ({
   darkMode,
   onReply,
   onDelete,
+  wba_id,
+  phone_number_id,
 }) => {
   const [showMore, setShowMore] = useState(false);
+
+  const handleBtnNavigation = async (type) => {
+    try {
+      const webhook_payload = new WbMessageStatus(
+        message.to?.replace(/\s+/g, "") || "",
+        phone_number_id,
+        wba_id
+      );
+      webhook_payload.type = type;
+      webhook_payload.messageId = message.id;
+      webhook_payload.wa_id = message.to;
+      webhook_payload.conversation =
+        typeof message.conversation === "string"
+          ? JSON.parse(message.conversation)
+          : message.conversation;
+      await WebhookService.push(webhook_payload.getObject());
+    } catch (error) {
+      console.error("Failed to update message status:", error);
+    }
+  };
 
   useEffect(() => {
     if (
@@ -897,9 +921,22 @@ const ChatMessage = ({
       {bubbleContent}
     </div>
   ) : (
-    <div className="flex justify-start items-center space-x-2">
-      {bubbleContent}
-      {actionButtons}
+    <div className="flex flex-col items-start space-y-2">
+      <div className="flex items-center space-x-2">
+        {bubbleContent}
+        {actionButtons}
+      </div>
+      <div className="flex gap-2">
+        <span onClick={() => handleBtnNavigation("sent")} className="inline-flex items-center rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-green-700/10 cursor-pointer"><BiCheck/></span>
+        <span onClick={() => handleBtnNavigation("delivered")} className="inline-flex items-center rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-blue-700/10 cursor-pointer"><BiCheckDouble/></span>
+        <span onClick={() => handleBtnNavigation("read")} className="inline-flex items-center rounded-md bg-white px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10 cursor-pointer"><BiCheckDouble/></span>
+      </div>
+      <div className="flex gap-2">
+        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">Re-engagement</span>
+        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">User experiment</span>
+        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">Undeliverable</span>
+        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">Ecosystem engagement</span>
+      </div>
     </div>
   );
 };
@@ -1415,6 +1452,8 @@ const ChatBot = ({
               darkMode={darkMode}
               onReply={handleReply}
               onDelete={handleDelete}
+              wba_id={wba_id}
+              phone_number_id={phone_number_id}
             />
           ))
         )}
