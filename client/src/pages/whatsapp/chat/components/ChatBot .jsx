@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { toast } from "react-toastify";
 import { BiCheckDouble, BiCheck } from "react-icons/bi";
 import { TbClockShare } from "react-icons/tb";
 import { VscLoading } from "react-icons/vsc";
@@ -206,6 +207,11 @@ const transformMessage = (apiMessage, phoneNumberId) => {
         "Unknown message type";
   }
 
+  // Normalize addressing and conversation details
+  const normalizedFrom = apiMessage.from || apiMessage.message?.from || null;
+  const normalizedTo = apiMessage.to || apiMessage.message?.to || null;
+  const normalizedConversation = apiMessage.conversation || apiMessage.message?.conversation || null;
+
   return {
     id: apiMessage.id || apiMessage.msg_id,
     type: messageType,
@@ -213,6 +219,10 @@ const transformMessage = (apiMessage, phoneNumberId) => {
     isUser: isUser,
     status: apiMessage.status || "delivered",
     timestamp: apiMessage.timestamp,
+    from: normalizedFrom,
+    to: normalizedTo,
+    conversation: normalizedConversation,
+    direction: apiMessage.direction,
     ...additionalData,
   };
 };
@@ -363,18 +373,23 @@ const ChatMessage = ({
   const handleBtnNavigation = async (type) => {
     try {
       const webhook_payload = new WbMessageStatus(
-        message.to?.replace(/\s+/g, "") || "",
+        (message.to || "").toString().replace(/\s+/g, ""),
         phone_number_id,
         wba_id
       );
       webhook_payload.type = type;
       webhook_payload.messageId = message.id;
-      webhook_payload.wa_id = message.to;
+      // For inbound (isUser=false), wa_id should be the contact's wa_id (from)
+      webhook_payload.wa_id = message.isUser ? message.to : message.from;
       webhook_payload.conversation =
         typeof message.conversation === "string"
           ? JSON.parse(message.conversation)
           : message.conversation;
       await WebhookService.push(webhook_payload.getObject());
+      // Optimistic local update
+      if (updateMessageStatus) {
+        updateMessageStatus(message.id, type === "read" ? "read" : type);
+      }
     } catch (error) {
       console.error("Failed to update message status:", error);
     }
@@ -419,10 +434,7 @@ const ChatMessage = ({
         onClick={(e) => {
           e.stopPropagation();
           if (message && message.content) {
-            console.log("Replying to message:", message);
             onReply(message);
-          } else {
-            console.warn("Invalid message object:", message);
           }
         }}
         className="p-1 hover:bg-gray-200 rounded bg-gray-100 cursor-pointer"
@@ -440,39 +452,56 @@ const ChatMessage = ({
       </div>
       {showMore && (
         <div className="relative">
-          <div className="absolute top-0 left-0 mt-1  bg-white text-black rounded shadow-lg text-xs z-10">
-            <div
+          <div className="absolute top-0 left-0 mt-1 bg-white text-black rounded shadow-lg text-xs z-10 min-w-32">
+            {/* Status Actions */}
+            {!message.isUser && (
+              <div className="flex flex-col">
+                <button onClick={(e) => { e.stopPropagation(); handleBtnNavigation("sent"); setShowMore(false); }} className="text-left px-3 py-1 hover:bg-gray-100 flex items-center gap-2">
+                  <BiCheck className="text-green-600" /> Sent
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); handleBtnNavigation("delivered"); setShowMore(false); }} className="text-left px-3 py-1 hover:bg-gray-100 flex items-center gap-2">
+                  <BiCheckDouble className="text-blue-600" /> Delivered
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); handleBtnNavigation("read"); setShowMore(false); }} className="text-left px-3 py-1 hover:bg-gray-100 flex items-center gap-2">
+                  <BiCheckDouble className="text-blue-700" /> Read
+                </button>
+                <div className="h-px bg-gray-200 my-1" />
+              </div>
+            )}
+            {/* Clipboard / Download / Delete */}
+            <button
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(message.id);
+                setShowMore(false);
               }}
-              className="block w-full px-2 py-1 hover:bg-gray-200"
+              className="w-full px-3 py-1 hover:bg-gray-100 flex items-center gap-2"
             >
-              <AiOutlineDelete className="text-red-500 text-center text-xl" />
-            </div>
+              <AiOutlineDelete className="text-red-500" /> Delete
+            </button>
             {message.type === "text" && (
-              <div
+              <button
                 onClick={(e) => {
                   e.stopPropagation();
                   handleCopy(e);
+                  setShowMore(false);
                 }}
-                className="block w-full px-2 py-1 text-center text-xl hover:bg-gray-200"
+                className="w-full px-3 py-1 hover:bg-gray-100 flex items-center gap-2"
               >
-                <IoCopyOutline />
-              </div>
+                <IoCopyOutline /> Copy
+              </button>
             )}
-            {(message.type === "image" ||
-              message.type === "video" ||
-              message.type === "audio") && (
-              <div
+            {(message.type === "image" || message.type === "video" || message.type === "audio") && (
+              <button
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDownload(e);
+                  setShowMore(false);
                 }}
-                className="w-full px-2 py-1 hover:bg-gray-200"
+                className="w-full px-3 py-1 hover:bg-gray-100 flex items-center gap-2"
               >
-                <MdDownload className="text-center text-xl" />
-              </div>
+                <MdDownload /> Download
+              </button>
             )}
           </div>
         </div>
@@ -926,17 +955,7 @@ const ChatMessage = ({
         {bubbleContent}
         {actionButtons}
       </div>
-      <div className="flex gap-2">
-        <span onClick={() => handleBtnNavigation("sent")} className="inline-flex items-center rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-green-700/10 cursor-pointer"><BiCheck/></span>
-        <span onClick={() => handleBtnNavigation("delivered")} className="inline-flex items-center rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-blue-700/10 cursor-pointer"><BiCheckDouble/></span>
-        <span onClick={() => handleBtnNavigation("read")} className="inline-flex items-center rounded-md bg-white px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10 cursor-pointer"><BiCheckDouble/></span>
-      </div>
-      <div className="flex gap-2">
-        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">Re-engagement</span>
-        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">User experiment</span>
-        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">Undeliverable</span>
-        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">Ecosystem engagement</span>
-      </div>
+      {/* Additional error/info chips can be added here if needed */}
     </div>
   );
 };
@@ -1281,8 +1300,16 @@ const ChatBot = ({
     setReplyMessage(message);
   };
 
-  const handleDelete = (id) => {
-    setMessages(messages.filter((msg) => msg.id !== id));
+  const handleDelete = async (id) => {
+    try {
+      if (!phone_number_id || !wa_id) return;
+      await businessService.deleteChatMessage(phone_number_id, wa_id, id);
+      setMessages((prev) => prev.filter((msg) => msg.id !== id));
+      toast.success("Message deleted");
+    } catch (e) {
+      console.error("Failed to delete message", e);
+      toast.error(e.message || "Failed to delete message");
+    }
   };
 
   console.log("replyMessage", replyMessage);
