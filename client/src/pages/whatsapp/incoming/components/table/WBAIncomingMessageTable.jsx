@@ -80,6 +80,7 @@ const WBAIncomingMessageTable = ({ wba_id, phone_number_id }) => {
 
   const handleBtnNavigation = async (message, type) => {
     try {
+      // First, send the webhook payload
       const webhook_payload = new WbMessageStatus(
         message.to.replace(/\s+/g, ""),
         phone_number_id,
@@ -94,11 +95,22 @@ const WBAIncomingMessageTable = ({ wba_id, phone_number_id }) => {
           : message.conversation;
       await WebhookService.push(webhook_payload.getObject());
 
-      // toast.success(`Message ID ${message.id} marked as ${type}`);
+      // Then update the message status in the database
+      await businessService.updateMessageStatus(phone_number_id, message.to, message.id, type);
 
-      
+      // Update local state to reflect the change
+      setBusinesses(prev => 
+        prev.map(msg => 
+          msg.id === message.id 
+            ? { ...msg, status: type, updated_at: new Date().toISOString() }
+            : msg
+        )
+      );
+
+      toast.success(`Message ID ${message.id} marked as ${type}`);
     } catch (error) {
-      // toast.error("Failed to update message status!");
+      console.error("Failed to update message status:", error);
+      toast.error("Failed to update message status!");
     }
   };
 
