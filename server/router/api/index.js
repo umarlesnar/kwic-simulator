@@ -999,6 +999,90 @@ ApiRouter.post("/:dynamic_value/client", async (req, res) => {
   });
 });
 
+// Add endpoint to delete messages
+ApiRouter.delete("/:dynamic_value/:wa_id/messages/:messageId", async (req, res) => {
+  const { dynamic_value, wa_id, messageId } = req.params;
+  
+  try {
+    const messageKey = `message:${dynamic_value}:${wa_id}:${messageId}`;
+    const messageExists = await req.redisManager.getByKey(messageKey);
+    
+    if (!messageExists) {
+      return res.status(404).json({ success: false, error: "Message not found" });
+    }
+    
+    // Delete the message from Redis
+    await req.redisManager.deleteByKey(messageKey);
+    
+    // Emit socket event for real-time updates
+    try {
+      const io = getIO();
+      const topic = `message/whatsapp/${wa_id}`;
+      io.to(topic).emit("message-deleted", {
+        messageId,
+        wa_id,
+        phone_number_id: dynamic_value,
+        timestamp: new Date(),
+      });
+    } catch (error) {
+      console.log("Error emitting socket event:", error);
+    }
+    
+    res.json({ success: true, message: "Message deleted successfully" });
+  } catch (error) {
+    console.log("Error deleting message:", error);
+    res.status(500).json({ success: false, error: "Failed to delete message" });
+  }
+});
+
+// Add endpoint to update message status
+ApiRouter.patch("/:dynamic_value/:wa_id/messages/:messageId/status", async (req, res) => {
+  const { dynamic_value, wa_id, messageId } = req.params;
+  const { status } = req.body;
+  
+  if (!status) {
+    return res.status(400).json({ success: false, error: "Status is required" });
+  }
+  
+  try {
+    const messageKey = `message:${dynamic_value}:${wa_id}:${messageId}`;
+    const messageData = await req.redisManager.getByKey(messageKey);
+    
+    if (!messageData) {
+      return res.status(404).json({ success: false, error: "Message not found" });
+    }
+    
+    // Update the message status
+    const updatedMessage = {
+      ...messageData,
+      status: status,
+      updated_at: new Date().toISOString(),
+    };
+    
+    await req.redisManager.putByKey(messageKey, updatedMessage, -1);
+    
+    // Emit socket event for real-time updates
+    try {
+      const io = getIO();
+      const topic = `message/whatsapp/${wa_id}`;
+      io.to(topic).emit("message-status-updated", {
+        messageId,
+        status,
+        wa_id,
+        phone_number_id: dynamic_value,
+        timestamp: new Date(),
+      });
+    } catch (error) {
+      console.log("Error emitting socket event:", error);
+    }
+    
+    res.json({ success: true, data: updatedMessage });
+  } catch (error) {
+    console.log("Error updating message status:", error);
+    res.status(500).json({ success: false, error: "Failed to update message status" });
+  }
+});
+
 ApiRouter.get("/:dynamic_value/whatsapp_commerce_settings", async (req, res) => {
   const { dynamic_value } = req.params;
   const catalog_key = `catalog:${dynamic_value}`;

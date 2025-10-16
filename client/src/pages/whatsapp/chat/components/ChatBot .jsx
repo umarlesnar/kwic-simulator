@@ -11,6 +11,7 @@ import {
 import { AiOutlineDelete } from "react-icons/ai";
 import { MdDownload } from "react-icons/md";
 import { TiArrowBack } from "react-icons/ti";
+import { ChevronDownIcon } from "@heroicons/react/24/outline";
 import {
   Cog6ToothIcon,
   MicrophoneIcon,
@@ -32,6 +33,7 @@ import { FaRegUser } from "react-icons/fa";
 import { useSearchParams } from "react-router-dom";
 import { businessService } from "@api/businessService";
 import WbMessageStatus from "@utils/WBMessageStatus";
+import { toast } from "react-toastify";
 
 // Utility function to format seconds as mm:ss
 const formatTime = (seconds) => {
@@ -347,6 +349,122 @@ const exampleMessages = [
   },
 ];
 
+// Action Dropdown Component
+const ActionDropdown = ({ message, handleBtnNavigation, onDelete, onReply, onCopy, onDownload, darkMode }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const actionItems = [
+    {
+      label: "Mark as Sent",
+      icon: <BiCheck className="h-4 w-4" />,
+      onClick: () => {
+        handleBtnNavigation(message, "sent");
+        setIsOpen(false);
+      },
+      className: "text-green-700 hover:bg-green-50"
+    },
+    {
+      label: "Mark as Delivered",
+      icon: <BiCheckDouble className="h-4 w-4" />,
+      onClick: () => {
+        handleBtnNavigation(message, "delivered");
+        setIsOpen(false);
+      },
+      className: "text-blue-700 hover:bg-blue-50"
+    },
+    {
+      label: "Mark as Read",
+      icon: <BiCheckDouble className="h-4 w-4" />,
+      onClick: () => {
+        handleBtnNavigation(message, "read");
+        setIsOpen(false);
+      },
+      className: "text-blue-700 hover:bg-blue-50"
+    },
+    {
+      label: "Reply",
+      icon: <TiArrowBack className="h-4 w-4" />,
+      onClick: () => {
+        onReply(message);
+        setIsOpen(false);
+      },
+      className: "text-gray-700 hover:bg-gray-50"
+    },
+    {
+      label: "Copy",
+      icon: <IoCopyOutline className="h-4 w-4" />,
+      onClick: () => {
+        onCopy();
+        setIsOpen(false);
+      },
+      className: "text-gray-700 hover:bg-gray-50",
+      show: message.type === "text"
+    },
+    {
+      label: "Download",
+      icon: <MdDownload className="h-4 w-4" />,
+      onClick: () => {
+        onDownload();
+        setIsOpen(false);
+      },
+      className: "text-gray-700 hover:bg-gray-50",
+      show: ["image", "video", "audio", "document"].includes(message.type)
+    },
+    {
+      label: "Delete",
+      icon: <AiOutlineDelete className="h-4 w-4" />,
+      onClick: () => {
+        onDelete(message.id);
+        setIsOpen(false);
+      },
+      className: "text-red-700 hover:bg-red-50"
+    }
+  ].filter(item => item.show !== false);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`p-1 hover:bg-gray-200 rounded bg-gray-100 cursor-pointer flex items-center gap-1 ${
+          darkMode ? "text-white" : "text-black"
+        }`}
+      >
+        <BsThreeDotsVertical className="h-4 w-4" />
+        <ChevronDownIcon className="h-3 w-3" />
+      </button>
+      
+      {isOpen && (
+        <div className="absolute top-0 right-0 mt-1 bg-white text-black rounded shadow-lg text-xs z-10 min-w-48 border">
+          {actionItems.map((item, index) => (
+            <div
+              key={index}
+              onClick={item.onClick}
+              className={`flex items-center gap-2 px-3 py-2 hover:bg-gray-100 cursor-pointer ${item.className}`}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ChatMessage component renders each message with reply & more options.
 const ChatMessage = ({
   message,
@@ -357,28 +475,10 @@ const ChatMessage = ({
   onDelete,
   wba_id,
   phone_number_id,
+  handleBtnNavigation,
 }) => {
   const [showMore, setShowMore] = useState(false);
 
-  const handleBtnNavigation = async (type) => {
-    try {
-      const webhook_payload = new WbMessageStatus(
-        message.to?.replace(/\s+/g, "") || "",
-        phone_number_id,
-        wba_id
-      );
-      webhook_payload.type = type;
-      webhook_payload.messageId = message.id;
-      webhook_payload.wa_id = message.to;
-      webhook_payload.conversation =
-        typeof message.conversation === "string"
-          ? JSON.parse(message.conversation)
-          : message.conversation;
-      await WebhookService.push(webhook_payload.getObject());
-    } catch (error) {
-      console.error("Failed to update message status:", error);
-    }
-  };
 
   useEffect(() => {
     if (
@@ -414,69 +514,16 @@ const ChatMessage = ({
   };
 
   const actionButtons = (
-    <div className="flex space-x-2 ">
-      <div
-        onClick={(e) => {
-          e.stopPropagation();
-          if (message && message.content) {
-            console.log("Replying to message:", message);
-            onReply(message);
-          } else {
-            console.warn("Invalid message object:", message);
-          }
-        }}
-        className="p-1 hover:bg-gray-200 rounded bg-gray-100 cursor-pointer"
-      >
-        <TiArrowBack className="h-4 w-4 text-black" />
-      </div>
-      <div
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowMore(!showMore);
-        }}
-        className="py-1 hover:bg-gray-200 cursor-pointer bg-gray-100 rounded text-black text-2xl"
-      >
-        <BsThreeDotsVertical className="h-4 w-4 cursor-pointer text-black" />
-      </div>
-      {showMore && (
-        <div className="relative">
-          <div className="absolute top-0 left-0 mt-1  bg-white text-black rounded shadow-lg text-xs z-10">
-            <div
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(message.id);
-              }}
-              className="block w-full px-2 py-1 hover:bg-gray-200"
-            >
-              <AiOutlineDelete className="text-red-500 text-center text-xl" />
-            </div>
-            {message.type === "text" && (
-              <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCopy(e);
-                }}
-                className="block w-full px-2 py-1 text-center text-xl hover:bg-gray-200"
-              >
-                <IoCopyOutline />
-              </div>
-            )}
-            {(message.type === "image" ||
-              message.type === "video" ||
-              message.type === "audio") && (
-              <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDownload(e);
-                }}
-                className="w-full px-2 py-1 hover:bg-gray-200"
-              >
-                <MdDownload className="text-center text-xl" />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+    <div className="flex space-x-2">
+      <ActionDropdown
+        message={message}
+        handleBtnNavigation={handleBtnNavigation}
+        onDelete={onDelete}
+        onReply={onReply}
+        onCopy={handleCopy}
+        onDownload={handleDownload}
+        darkMode={darkMode}
+      />
     </div>
   );
 
@@ -926,17 +973,6 @@ const ChatMessage = ({
         {bubbleContent}
         {actionButtons}
       </div>
-      <div className="flex gap-2">
-        <span onClick={() => handleBtnNavigation("sent")} className="inline-flex items-center rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-green-700/10 cursor-pointer"><BiCheck/></span>
-        <span onClick={() => handleBtnNavigation("delivered")} className="inline-flex items-center rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-blue-700/10 cursor-pointer"><BiCheckDouble/></span>
-        <span onClick={() => handleBtnNavigation("read")} className="inline-flex items-center rounded-md bg-white px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10 cursor-pointer"><BiCheckDouble/></span>
-      </div>
-      <div className="flex gap-2">
-        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">Re-engagement</span>
-        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">User experiment</span>
-        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">Undeliverable</span>
-        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer">Ecosystem engagement</span>
-      </div>
     </div>
   );
 };
@@ -1281,8 +1317,19 @@ const ChatBot = ({
     setReplyMessage(message);
   };
 
-  const handleDelete = (id) => {
-    setMessages(messages.filter((msg) => msg.id !== id));
+  const handleDelete = async (id) => {
+    try {
+      // Delete from server
+      await businessService.deleteMessage(phone_number_id, wa_id, id);
+      
+      // Update local state
+      setMessages(messages.filter((msg) => msg.id !== id));
+      
+      toast.success("Message deleted successfully");
+    } catch (error) {
+      console.error("Failed to delete message:", error);
+      toast.error("Failed to delete message");
+    }
   };
 
   console.log("replyMessage", replyMessage);
@@ -1454,6 +1501,7 @@ const ChatBot = ({
               onDelete={handleDelete}
               wba_id={wba_id}
               phone_number_id={phone_number_id}
+              handleBtnNavigation={handleBtnNavigation}
             />
           ))
         )}

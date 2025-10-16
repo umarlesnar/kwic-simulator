@@ -162,4 +162,31 @@ export const businessService = {
       );
     }
   },
+
+  deleteMessage: async (phone_number_id, wa_id, messageId) => {
+    try {
+      const response = await http.delete(
+        `/${phone_number_id}/${wa_id}/messages/${messageId}`
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.message || "Failed to delete message"
+      );
+    }
+  },
+
+  updateMessageStatus: async (phone_number_id, wa_id, messageId, status) => {
+    try {
+      const response = await http.patch(
+        `/${phone_number_id}/${wa_id}/messages/${messageId}/status`,
+        { status }
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.message || "Failed to update message status"
+      );
+    }
+  },
 };
