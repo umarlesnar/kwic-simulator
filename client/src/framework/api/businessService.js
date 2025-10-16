@@ -135,6 +135,17 @@ export const businessService = {
     }
   },
 
+  deleteChatMessage: async (phone_number_id, wa_id, message_id) => {
+    try {
+      const response = await http.delete(`/${phone_number_id}/${wa_id}/messages/${message_id}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.message || "Failed to delete chat message"
+      );
+    }
+  },
+
   getChatInfo: async (phone_number_id, wa_id) => {
     try {
       const response = await http.get(`/${phone_number_id}/${wa_id}/info`);

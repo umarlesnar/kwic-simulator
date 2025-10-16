@@ -81,22 +81,21 @@ const WBAIncomingMessageTable = ({ wba_id, phone_number_id }) => {
   const handleBtnNavigation = async (message, type) => {
     try {
       const webhook_payload = new WbMessageStatus(
-        message.to.replace(/\s+/g, ""),
+        (message.to || "").toString().replace(/\s+/g, ""),
         phone_number_id,
         wba_id
       );
       webhook_payload.type = type;
       webhook_payload.messageId = message.id;
-      webhook_payload.wa_id = message.to;
+      // For inbound messages (direction === 'incoming'), use 'from' as wa_id
+      webhook_payload.wa_id = message.direction === 'incoming' ? message.from : message.to;
       webhook_payload.conversation =
         typeof message.conversation === "string"
           ? JSON.parse(message.conversation)
           : message.conversation;
       await WebhookService.push(webhook_payload.getObject());
-
-      // toast.success(`Message ID ${message.id} marked as ${type}`);
-
-      
+      // Refresh table after status change
+      await fetchBusinesses();
     } catch (error) {
       // toast.error("Failed to update message status!");
     }

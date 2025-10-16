@@ -459,7 +459,7 @@ ApiRouter.post("/webhook/push", async (req, res) => {
       payload,
     });
 
-    // Persist messages to Redis so they can be retrieved by
+    // Persist messages and statuses to Redis so they can be retrieved by
     // GET "/:dynamic_value/:wa_id/messages"
     if (
       payload?.object === "whatsapp_business_account" &&
@@ -472,80 +472,132 @@ ApiRouter.post("/webhook/push", async (req, res) => {
         const contactWaId =
           value?.contacts?.[0]?.wa_id || value?.messages?.[0]?.from;
 
-        if (!phoneNumberId || !contactWaId || !Array.isArray(value?.messages)) {
-          continue;
+        // Persist inbound messages
+        if (phoneNumberId && contactWaId && Array.isArray(value?.messages)) {
+          for (const msg of value.messages) {
+            const msgId =
+              msg.id ||
+              "wamid." + Date.now() + Math.random().toString(36).slice(2, 10);
+            const createdAt = msg.timestamp
+              ? new Date(parseInt(msg.timestamp, 10) * 1000).toISOString()
+              : new Date().toISOString();
+
+            // Persist the FULL original WhatsApp message payload to avoid losing fields
+            const storedMessage = {
+              id: msgId,
+              from: msg.from || contactWaId, // sender is the wa_id for inbound webhook events
+              to: phoneNumberId,
+              type: msg.type || (msg.text ? "text" : "unknown"),
+              text: msg.text, // quick access for text messages
+              message: msg, // full raw payload for all message types
+              created_at: createdAt,
+              status: "delivered",
+            };
+
+            const messageKey = `message:${phoneNumberId}:${contactWaId}:${msgId}`;
+            await req.redisManager.putByKey(messageKey, storedMessage, -1);
+
+            // Optionally persist order details for order-type messages
+            if (
+              msg.type === "order" ||
+              msg.interactive?.type === "order_details"
+            ) {
+              const orderData = msg.order || msg.interactive?.action?.parameters || msg.interactive?.action;
+              const orderKey = `order:${phoneNumberId}:${contactWaId}:${msgId}`;
+              await req.redisManager.putByKey(
+                orderKey,
+                {
+                  id: msgId,
+                  name: orderData?.name || orderData?.order?.name || orderData?.order?.items?.[0]?.name || null,
+                  catalog_id: orderData?.catalog_id,
+                  currency:
+                    orderData?.currency ||
+                    orderData?.total_amount?.currency ||
+                    (Array.isArray(orderData?.order?.items) && orderData.order.items[0]?.currency) ||
+                    null,
+                  product_items:
+                    orderData?.product_items ||
+                    orderData?.order?.items ||
+                    orderData?.sections?.[0]?.product_items ||
+                    [],
+                  totals: {
+                    total_amount: orderData?.total_amount || null,
+                    subtotal: orderData?.order?.subtotal || null,
+                    tax: orderData?.order?.tax || null,
+                    shipping: orderData?.order?.shipping || null,
+                    discount: orderData?.order?.discount || null,
+                  },
+                  created_at: createdAt,
+                },
+                -1
+              );
+            }
+
+            // Emit socket event for real-time updates (best effort)
+            try {
+              const io = getIO();
+              const topic = `message/whatsapp/${contactWaId}`;
+              io.to(topic).emit("topic-data", {
+                topic,
+                data: storedMessage,
+                timestamp: new Date(),
+              });
+            } catch (error) {
+              console.log("Error emitting socket event:", error);
+            }
+          }
         }
 
-        for (const msg of value.messages) {
-          const msgId =
-            msg.id ||
-            "wamid." + Date.now() + Math.random().toString(36).slice(2, 10);
-          const createdAt = msg.timestamp
-            ? new Date(parseInt(msg.timestamp, 10) * 1000).toISOString()
-            : new Date().toISOString();
+        // Persist and apply STATUS updates to existing messages
+        if (phoneNumberId && Array.isArray(value?.statuses)) {
+          for (const statusUpdate of value.statuses) {
+            try {
+              const msgId = statusUpdate.id;
+              const recipientWaId = statusUpdate.recipient_id;
+              const status = statusUpdate.status; // sent | delivered | read | failed | unknown | pending
+              const ts = statusUpdate.timestamp
+                ? new Date(parseInt(statusUpdate.timestamp, 10) * 1000).toISOString()
+                : new Date().toISOString();
 
-          // Persist the FULL original WhatsApp message payload to avoid losing fields
-          const storedMessage = {
-            id: msgId,
-            from: msg.from || contactWaId, // sender is the wa_id for inbound webhook events
-            to: phoneNumberId,
-            type: msg.type || (msg.text ? "text" : "unknown"),
-            text: msg.text, // quick access for text messages
-            message: msg, // full raw payload for all message types
-            created_at: createdAt,
-            status: "delivered",
-          };
+              if (!msgId || !recipientWaId) continue;
 
-          const messageKey = `message:${phoneNumberId}:${contactWaId}:${msgId}`;
-          await req.redisManager.putByKey(messageKey, storedMessage, -1);
+              const messageKey = `message:${phoneNumberId}:${recipientWaId}:${msgId}`;
+              const existing = await req.redisManager.getByKey(messageKey);
+              if (!existing) continue; // nothing to update
 
-          // Optionally persist order details for order-type messages
-          if (
-            msg.type === "order" ||
-            msg.interactive?.type === "order_details"
-          ) {
-            const orderData = msg.order || msg.interactive?.action?.parameters || msg.interactive?.action;
-            const orderKey = `order:${phoneNumberId}:${contactWaId}:${msgId}`;
-            await req.redisManager.putByKey(
-              orderKey,
-              {
-                id: msgId,
-                name: orderData?.name || orderData?.order?.name || orderData?.order?.items?.[0]?.name || null,
-                catalog_id: orderData?.catalog_id,
-                currency:
-                  orderData?.currency ||
-                  orderData?.total_amount?.currency ||
-                  (Array.isArray(orderData?.order?.items) && orderData.order.items[0]?.currency) ||
-                  null,
-                product_items:
-                  orderData?.product_items ||
-                  orderData?.order?.items ||
-                  orderData?.sections?.[0]?.product_items ||
-                  [],
-                totals: {
-                  total_amount: orderData?.total_amount || null,
-                  subtotal: orderData?.order?.subtotal || null,
-                  tax: orderData?.order?.tax || null,
-                  shipping: orderData?.order?.shipping || null,
-                  discount: orderData?.order?.discount || null,
-                },
-                created_at: createdAt,
-              },
-              -1
-            );
-          }
+              const updated = { ...existing, status };
+              if (status === "delivered") updated.delivered_at = ts;
+              if (status === "read") updated.read_at = ts;
+              if (
+                statusUpdate.conversation &&
+                (!existing.conversation || Object.keys(existing.conversation).length === 0)
+              ) {
+                // Capture conversation details if provided by status webhook
+                updated.conversation = {
+                  id: statusUpdate.conversation.id,
+                  origin: statusUpdate.conversation.origin,
+                  pricing: statusUpdate.conversation.pricing,
+                  expiration_timestamp: statusUpdate.conversation.expiration_timestamp,
+                };
+              }
 
-          // Emit socket event for real-time updates (best effort)
-          try {
-            const io = getIO();
-            const topic = `message/whatsapp/${contactWaId}`;
-            io.to(topic).emit("topic-data", {
-              topic,
-              data: storedMessage,
-              timestamp: new Date(),
-            });
-          } catch (error) {
-            console.log("Error emitting socket event:", error);
+              await req.redisManager.putByKey(messageKey, updated, -1);
+
+              // Emit socket event for real-time updates (best effort)
+              try {
+                const io = getIO();
+                const topic = `message/whatsapp/${recipientWaId}`;
+                io.to(topic).emit("topic-data", {
+                  topic,
+                  data: updated,
+                  timestamp: new Date(),
+                });
+              } catch (error) {
+                console.log("Error emitting socket event:", error);
+              }
+            } catch (e) {
+              console.log("Error applying status update:", e);
+            }
           }
         }
       }
@@ -872,7 +924,8 @@ ApiRouter.get("/:dynamic_value/:wa_id/messages", async (req, res) => {
       };
     }
 
-    // Remove sensitive / unnecessary fields from the raw payload before returning
+    // Preserve conversation details at top-level if present
+    const conversation = messageData.conversation || raw?.conversation || null;
     if (raw && raw.conversation) {
       try {
         delete raw.conversation;
@@ -890,6 +943,7 @@ ApiRouter.get("/:dynamic_value/:wa_id/messages", async (req, res) => {
       type,
       text, // convenience
       message: raw, // full payload (with conversation removed)
+      conversation, // normalized conversation details for UI actions
       order, // normalized order details when applicable
       template, // normalized template info when applicable
       timestamp,
@@ -905,6 +959,43 @@ ApiRouter.get("/:dynamic_value/:wa_id/messages", async (req, res) => {
   const uniqueMessages = Array.from(uniqueById.values());
   uniqueMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
   res.json({ success: true, data: uniqueMessages });
+});
+
+// Delete a specific message (Redis + emit optional socket event)
+ApiRouter.delete("/:dynamic_value/:wa_id/messages/:message_id", async (req, res) => {
+  try {
+    const { dynamic_value, wa_id, message_id } = req.params;
+    const messageKey = `message:${dynamic_value}:${wa_id}:${message_id}`;
+
+    const existing = await req.redisManager.getByKey(messageKey);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Message not found" });
+    }
+
+    const redis = await req.redisManager.getClient();
+    await redis.del(messageKey);
+
+    // Also clean possible order record
+    const orderKey = `order:${dynamic_value}:${wa_id}:${message_id}`;
+    await redis.del(orderKey);
+
+    try {
+      const io = getIO();
+      const topic = `message/whatsapp/${wa_id}`;
+      io.to(topic).emit("messageDeleted", {
+        topic,
+        data: { id: message_id, wa_id, phone_number_id: dynamic_value },
+        timestamp: new Date(),
+      });
+    } catch (e) {
+      // ignore socket emission errors
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.log("Error deleting message:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
 ApiRouter.get("/:dynamic_value/:wa_id/info", async (req, res) => {
