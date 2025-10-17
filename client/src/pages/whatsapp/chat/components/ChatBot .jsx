@@ -357,6 +357,36 @@ const exampleMessages = [
   },
 ];
 
+// ErrorActions component for handling error scenarios
+const ErrorActions = ({ message, handleErrorAction }) => (
+  <div className="flex gap-2 text-sm text-red-700">
+    <span 
+      onClick={() => handleErrorAction(message, "re-engagement")} 
+      className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100"
+    >
+      Re-engagement
+    </span>
+    <span 
+      onClick={() => handleErrorAction(message, "user-experiment")} 
+      className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100"
+    >
+      User experiment
+    </span>
+    <span 
+      onClick={() => handleErrorAction(message, "undeliverable")} 
+      className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100"
+    >
+      Undeliverable
+    </span>
+    <span 
+      onClick={() => handleErrorAction(message, "ecosystem-engagement")} 
+      className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100"
+    >
+      Ecosystem engagement
+    </span>
+  </div>
+);
+
 // ChatMessage component renders each message with reply & more options.
 const ChatMessage = ({
   message,
@@ -390,8 +420,54 @@ const ChatMessage = ({
       if (updateMessageStatus) {
         updateMessageStatus(message.id, type === "read" ? "read" : type);
       }
+      toast.success(`Message status updated to ${type}`);
     } catch (error) {
       console.error("Failed to update message status:", error);
+      toast.error("Failed to update message status");
+    }
+  };
+
+  const handleErrorAction = async (message, errorType) => {
+    try {
+      const webhook_payload = new WbMessageStatus(
+        (message.to || "").toString().replace(/\s+/g, ""),
+        phone_number_id,
+        wba_id
+      );
+      webhook_payload.type = "failed";
+      webhook_payload.messageId = message.id;
+      webhook_payload.wa_id = message.isUser ? message.to : message.from;
+      webhook_payload.conversation =
+        typeof message.conversation === "string"
+          ? JSON.parse(message.conversation)
+          : message.conversation;
+      
+      // Set appropriate error code based on error type
+      switch (errorType) {
+        case "re-engagement":
+          webhook_payload.error_code = "131047";
+          break;
+        case "user-experiment":
+          webhook_payload.error_code = "130472";
+          break;
+        case "undeliverable":
+          webhook_payload.error_code = "131026";
+          break;
+        case "ecosystem-engagement":
+          webhook_payload.error_code = "131049";
+          break;
+        default:
+          webhook_payload.error_code = "131014";
+      }
+      
+      await WebhookService.push(webhook_payload.getObject());
+      if (updateMessageStatus) {
+        updateMessageStatus(message.id, "error");
+      }
+      toast.success(`Error action ${errorType} applied`);
+    } catch (error) {
+      console.error("Failed to apply error action:", error);
+      toast.error("Failed to apply error action");
     }
   };
 
@@ -468,6 +544,12 @@ const ChatMessage = ({
                 <div className="h-px bg-gray-200 my-1" />
               </div>
             )}
+            {/* Error Actions */}
+            <div className="px-3 py-1 text-red-600 font-medium">Error Actions:</div>
+            <div className="px-3 py-1">
+              <ErrorActions message={message} handleErrorAction={handleErrorAction} />
+            </div>
+            <div className="h-px bg-gray-200 my-1" />
             {/* Clipboard / Download / Delete */}
             <button
               onClick={(e) => {
@@ -930,7 +1012,7 @@ const ChatMessage = ({
       )}
 
       {message.status && (
-        <div className="mt-1 text-xs flex justify-end">
+        <div className={`mt-1 text-xs flex ${message.isUser ? 'justify-end' : 'justify-start'}`}>
           {message.status === "pending" && <TbClockShare className="" />}
           {message.status === "uploading" &&
             `Uploading... ${message.uploadProgress || 0}%`}
@@ -938,7 +1020,12 @@ const ChatMessage = ({
           {message.status === "delivered" && (
             <BiCheckDouble className="text-xl text-blue-500" />
           )}
-          {message.status === "error" && "Error"}
+          {message.status === "read" && (
+            <BiCheckDouble className="text-xl text-blue-700" />
+          )}
+          {message.status === "error" && (
+            <span className="text-red-500">Error</span>
+          )}
         </div>
       )}
     </div>
@@ -955,7 +1042,12 @@ const ChatMessage = ({
         {bubbleContent}
         {actionButtons}
       </div>
-      {/* Additional error/info chips can be added here if needed */}
+      {/* Status display for non-user messages */}
+      {message.status && (
+        <div className="flex items-center space-x-2 text-xs text-gray-500">
+          <span>Status: {message.status}</span>
+        </div>
+      )}
     </div>
   );
 };
