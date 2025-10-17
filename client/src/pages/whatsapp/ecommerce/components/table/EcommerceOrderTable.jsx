@@ -93,10 +93,9 @@ const EcommerceOrderMessageTable = ({ wba_id, phone_number_id }) => {
           ? JSON.parse(message.conversation)
           : message.conversation;
       await WebhookService.push(webhook_payload.getObject());
-
-      // toast.success(`Message ID ${message.id} marked as ${type}`);
-
       
+      // Refresh data after status change
+      await fetchBusinesses();
     } catch (error) {
       // toast.error("Failed to update message status!");
     }

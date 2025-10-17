@@ -367,6 +367,7 @@ const ChatMessage = ({
   onDelete,
   wba_id,
   phone_number_id,
+  refreshMessages,
 }) => {
   const [showMore, setShowMore] = useState(false);
 
@@ -386,13 +387,19 @@ const ChatMessage = ({
           ? JSON.parse(message.conversation)
           : message.conversation;
       await WebhookService.push(webhook_payload.getObject());
-      // Optimistic local update - map the type to the correct status
-      if (updateMessageStatus) {
-        let status = type;
-        if (type === "sent") status = "sent";
-        else if (type === "delivered") status = "delivered";
-        else if (type === "read") status = "read";
-        updateMessageStatus(message.id, status);
+      
+      // Refresh messages from server to get updated status
+      if (refreshMessages) {
+        await refreshMessages();
+      } else {
+        // Fallback to optimistic update if refresh function not available
+        if (updateMessageStatus) {
+          let status = type;
+          if (type === "sent") status = "sent";
+          else if (type === "delivered") status = "delivered";
+          else if (type === "read") status = "read";
+          updateMessageStatus(message.id, status);
+        }
       }
     } catch (error) {
       console.error("Failed to update message status:", error);
@@ -1533,6 +1540,7 @@ const ChatBot = ({
               onDelete={handleDelete}
               wba_id={wba_id}
               phone_number_id={phone_number_id}
+              refreshMessages={fetchMessages}
             />
           ))
         )}
