@@ -217,7 +217,7 @@ const transformMessage = (apiMessage, phoneNumberId) => {
     type: messageType,
     content: content,
     isUser: isUser,
-    status: apiMessage.status || "delivered",
+    status: apiMessage.status || (isUser ? "sent" : "delivered"),
     timestamp: apiMessage.timestamp,
     from: normalizedFrom,
     to: normalizedTo,
@@ -386,12 +386,17 @@ const ChatMessage = ({
           ? JSON.parse(message.conversation)
           : message.conversation;
       await WebhookService.push(webhook_payload.getObject());
-      // Optimistic local update
+      // Optimistic local update - map the type to the correct status
       if (updateMessageStatus) {
-        updateMessageStatus(message.id, type === "read" ? "read" : type);
+        let status = type;
+        if (type === "sent") status = "sent";
+        else if (type === "delivered") status = "delivered";
+        else if (type === "read") status = "read";
+        updateMessageStatus(message.id, status);
       }
     } catch (error) {
       console.error("Failed to update message status:", error);
+      toast.error("Failed to update message status");
     }
   };
 
@@ -427,6 +432,40 @@ const ChatMessage = ({
     e.stopPropagation();
     window.open(message.content, "_blank");
   };
+
+  // Error Actions component similar to WBAIncomingMessageTable
+  const ErrorActions = () => (
+    <div className="flex gap-1 text-xs">
+      <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100">Re-engagement</span>
+      <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100">User experiment</span>
+      <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100">Undeliverable</span>
+      <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100">Ecosystem engagement</span>
+    </div>
+  );
+
+  // Action Button Group component similar to WBAIncomingMessageTable
+  const ActionButtonGroup = () => (
+    <div className="flex gap-1">
+      <span 
+        onClick={(e) => { e.stopPropagation(); handleBtnNavigation("sent"); }} 
+        className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-green-700/10 cursor-pointer hover:bg-green-100"
+      >
+        SENT
+      </span>
+      <span 
+        onClick={(e) => { e.stopPropagation(); handleBtnNavigation("delivered"); }} 
+        className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10 cursor-pointer hover:bg-blue-100"
+      >
+        DELIVERED
+      </span>
+      <span 
+        onClick={(e) => { e.stopPropagation(); handleBtnNavigation("read"); }} 
+        className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10 cursor-pointer hover:bg-blue-100"
+      >
+        READ
+      </span>
+    </div>
+  );
 
   const actionButtons = (
     <div className="flex space-x-2 ">
@@ -929,18 +968,24 @@ const ChatMessage = ({
         </div>
       )}
 
-      {message.status && (
-        <div className="mt-1 text-xs flex justify-end">
-          {message.status === "pending" && <TbClockShare className="" />}
-          {message.status === "uploading" &&
-            `Uploading... ${message.uploadProgress || 0}%`}
-          {message.status === "sent" && <BiCheckDouble className="text-xl" />}
-          {message.status === "delivered" && (
-            <BiCheckDouble className="text-xl text-blue-500" />
-          )}
-          {message.status === "error" && "Error"}
-        </div>
-      )}
+      {/* Message Status Display */}
+      <div className="mt-1 text-xs flex justify-end">
+        {message.status === "pending" && <TbClockShare className="" />}
+        {message.status === "uploading" &&
+          `Uploading... ${message.uploadProgress || 0}%`}
+        {message.status === "sent" && <BiCheckDouble className="text-xl" />}
+        {message.status === "delivered" && (
+          <BiCheckDouble className="text-xl text-blue-500" />
+        )}
+        {message.status === "read" && (
+          <BiCheckDouble className="text-xl text-blue-700" />
+        )}
+        {message.status === "error" && "Error"}
+        {/* Show default status for isUser: false messages if no status is set */}
+        {!message.isUser && !message.status && (
+          <BiCheckDouble className="text-xl text-gray-400" />
+        )}
+      </div>
     </div>
   );
 
@@ -955,7 +1000,14 @@ const ChatMessage = ({
         {bubbleContent}
         {actionButtons}
       </div>
-      {/* Additional error/info chips can be added here if needed */}
+      {/* Action Button Group for incoming messages */}
+      <div className="ml-2">
+        <ActionButtonGroup />
+      </div>
+      {/* Error Actions for incoming messages */}
+      <div className="ml-2">
+        <ErrorActions />
+      </div>
     </div>
   );
 };
