@@ -68,7 +68,8 @@ const transformMessage = (apiMessage, phoneNumberId) => {
         content = {
           title: template.name || "Template Message",
           body:
-            template.components?.find((c) => c.type === "BODY")?.text || template.components?.[0]?.text ||
+            template.components?.find((c) => c.type === "BODY")?.text ||
+            template.components?.[0]?.text ||
             "Template content",
           button:
             template.components?.find((c) => c.type === "BUTTONS")?.buttons?.[0]
@@ -210,7 +211,8 @@ const transformMessage = (apiMessage, phoneNumberId) => {
   // Normalize addressing and conversation details
   const normalizedFrom = apiMessage.from || apiMessage.message?.from || null;
   const normalizedTo = apiMessage.to || apiMessage.message?.to || null;
-  const normalizedConversation = apiMessage.conversation || apiMessage.message?.conversation || null;
+  const normalizedConversation =
+    apiMessage.conversation || apiMessage.message?.conversation || null;
 
   return {
     id: apiMessage.id || apiMessage.msg_id,
@@ -380,30 +382,18 @@ const ChatMessage = ({
       );
       webhook_payload.type = type;
       webhook_payload.messageId = message.id;
-      // For inbound (isUser=false), wa_id should be the contact's wa_id (from)
-      webhook_payload.wa_id = message.isUser ? message.to : message.from;
+      // For inbound messages (direction === 'incoming'), use 'from' as wa_id
+      webhook_payload.wa_id =
+        message.direction === "incoming" ? message.from : message.to;
       webhook_payload.conversation =
         typeof message.conversation === "string"
           ? JSON.parse(message.conversation)
           : message.conversation;
       await WebhookService.push(webhook_payload.getObject());
-      
-      // Refresh messages from server to get updated status
-      if (refreshMessages) {
-        await refreshMessages();
-      } else {
-        // Fallback to optimistic update if refresh function not available
-        if (updateMessageStatus) {
-          let status = type;
-          if (type === "sent") status = "sent";
-          else if (type === "delivered") status = "delivered";
-          else if (type === "read") status = "read";
-          updateMessageStatus(message.id, status);
-        }
-      }
+      await fetchBusinesses();
+      await refreshMessages();
     } catch (error) {
-      console.error("Failed to update message status:", error);
-      toast.error("Failed to update message status");
+      // toast.error("Failed to update message status!");
     }
   };
 
@@ -420,6 +410,9 @@ const ChatMessage = ({
           updateMessageStatus(message.id, "sent");
           setTimeout(() => {
             updateMessageStatus(message.id, "delivered");
+            setTimeout(() => {
+              updateMessageStatus(message.id, "read");
+            }, 2000);
           }, 2000);
         } catch (error) {
           console.error("Error sending message:", error);
@@ -440,39 +433,26 @@ const ChatMessage = ({
     window.open(message.content, "_blank");
   };
 
-  // Error Actions component similar to WBAIncomingMessageTable
+  // Error Actions
   const ErrorActions = () => (
-    <div className="flex gap-1 text-xs">
-      <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100">Re-engagement</span>
-      <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100">User experiment</span>
-      <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100">Undeliverable</span>
-      <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-red-700/10 cursor-pointer hover:bg-red-100">Ecosystem engagement</span>
+    <div className="flex flex-col text-sm bg-white">
+      <button className="text-left px-3 py-1 text-sm font-medium text-black cursor-pointer hover:bg-gray-100 !bg-white border-0 rounded-md" style={{ backgroundColor: 'white' }}>
+        Re-engagement
+      </button>
+      <button className="text-left px-3 py-1 text-sm font-medium text-black cursor-pointer hover:bg-gray-100 !bg-white border-0 rounded-md" style={{ backgroundColor: 'white' }}>
+        User experiment
+      </button>
+      <button className="text-left px-3 py-1 text-sm font-medium text-black cursor-pointer hover:bg-gray-100 !bg-white border-0 rounded-md" style={{ backgroundColor: 'white' }}>
+        Undeliverable
+      </button>
+      <button className="text-left px-3 py-1 text-sm font-medium text-black cursor-pointer hover:bg-gray-100 !bg-white border-0 rounded-md" style={{ backgroundColor: 'white' }}>
+        Ecosystem engagement
+      </button>
     </div>
   );
 
   // Action Button Group component similar to WBAIncomingMessageTable
-  const ActionButtonGroup = () => (
-    <div className="flex gap-1">
-      <span 
-        onClick={(e) => { e.stopPropagation(); handleBtnNavigation("sent"); }} 
-        className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-green-700/10 cursor-pointer hover:bg-green-100"
-      >
-        SENT
-      </span>
-      <span 
-        onClick={(e) => { e.stopPropagation(); handleBtnNavigation("delivered"); }} 
-        className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10 cursor-pointer hover:bg-blue-100"
-      >
-        DELIVERED
-      </span>
-      <span 
-        onClick={(e) => { e.stopPropagation(); handleBtnNavigation("read"); }} 
-        className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-700/10 cursor-pointer hover:bg-blue-100"
-      >
-        READ
-      </span>
-    </div>
-  );
+  
 
   const actionButtons = (
     <div className="flex space-x-2 ">
@@ -497,21 +477,44 @@ const ChatMessage = ({
         <BsThreeDotsVertical className="h-4 w-4 cursor-pointer text-black" />
       </div>
       {showMore && (
-        <div className="relative">
-          <div className="absolute top-0 left-0 mt-1 bg-white text-black rounded shadow-lg text-xs z-10 min-w-32">
+        <div className="relative rounded-xl">
+          <div className="absolute top-0 left-0 mt-0 bg-white text-black rounded-xl shadow-lg text-xs z-10 min-w-25">
             {/* Status Actions */}
             {!message.isUser && (
-              <div className="flex flex-col">
-                <button onClick={(e) => { e.stopPropagation(); handleBtnNavigation("sent"); setShowMore(false); }} className="text-left px-3 py-1 hover:bg-gray-100 flex items-center gap-2">
+              <div className="flex flex-col bg-white rounded-2xl">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleBtnNavigation("sent");
+                    setShowMore(false);
+                  }}
+                  className="text-left px-3 py-1 hover:bg-gray-100 flex items-center gap-2 text-black !bg-white border-0 rounded-md"
+                  style={{ backgroundColor: 'white' }}
+                >
                   <BiCheck className="text-green-600" /> Sent
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); handleBtnNavigation("delivered"); setShowMore(false); }} className="text-left px-3 py-1 hover:bg-gray-100 flex items-center gap-2">
-                  <BiCheckDouble className="text-blue-600" /> Delivered
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleBtnNavigation("delivered");
+                    setShowMore(false);
+                  }}
+                  className="text-left px-3 py-1 hover:bg-gray-100 flex items-center gap-2 text-black !bg-white border-0 rounded-md"
+                  style={{ backgroundColor: 'white' }}
+                >
+                  <BiCheckDouble className="text-gray-400" /> Delivered
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); handleBtnNavigation("read"); setShowMore(false); }} className="text-left px-3 py-1 hover:bg-gray-100 flex items-center gap-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleBtnNavigation("read");
+                    setShowMore(false);
+                  }}
+                  className="text-left px-3 py-1 hover:bg-gray-100 flex items-center gap-2 text-black !bg-white border-0 rounded-md"
+                  style={{ backgroundColor: 'white' }}
+                >
                   <BiCheckDouble className="text-blue-700" /> Read
                 </button>
-                <div className="h-px bg-gray-200 my-1" />
               </div>
             )}
             {/* Clipboard / Download / Delete */}
@@ -521,7 +524,8 @@ const ChatMessage = ({
                 onDelete(message.id);
                 setShowMore(false);
               }}
-              className="w-full px-3 py-1 hover:bg-gray-100 flex items-center gap-2"
+              className="w-full px-3 py-1 hover:bg-gray-100 flex items-center gap-2 text-black !bg-white border-0 rounded-md"
+              style={{ backgroundColor: 'white' }}
             >
               <AiOutlineDelete className="text-red-500" /> Delete
             </button>
@@ -532,19 +536,23 @@ const ChatMessage = ({
                   handleCopy(e);
                   setShowMore(false);
                 }}
-                className="w-full px-3 py-1 hover:bg-gray-100 flex items-center gap-2"
+                className="w-full px-3 py-1 hover:bg-gray-100 flex items-center gap-2 text-black !bg-white border-0 rounded-md"
+                style={{ backgroundColor: 'white' }}
               >
                 <IoCopyOutline /> Copy
               </button>
             )}
-            {(message.type === "image" || message.type === "video" || message.type === "audio") && (
+            {(message.type === "image" ||
+              message.type === "video" ||
+              message.type === "audio") && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDownload(e);
                   setShowMore(false);
                 }}
-                className="w-full px-3 py-1 hover:bg-gray-100 flex items-center gap-2"
+                className="w-full px-3 py-1 hover:bg-gray-100 flex items-center gap-2 text-black !bg-white border-0 rounded-md"
+                style={{ backgroundColor: 'white' }}
               >
                 <MdDownload /> Download
               </button>
@@ -647,7 +655,7 @@ const ChatMessage = ({
               e.target.nextSibling.style.display = "block";
             }}
           />
-          <div className="hidden text-gray-500 text-sm flex items-center justify-center w-32 h-32 bg-gray-100 rounded-lg">
+          <div className=" text-gray-500 text-sm flex items-center justify-center w-32 h-32 bg-gray-100 rounded-lg">
             Sticker
           </div>
         </div>
@@ -980,9 +988,10 @@ const ChatMessage = ({
         {message.status === "pending" && <TbClockShare className="" />}
         {message.status === "uploading" &&
           `Uploading... ${message.uploadProgress || 0}%`}
-        {message.status === "sent" && <BiCheckDouble className="text-xl" />}
+        {message.status === "sent" && 
+        <BiCheck className="text-xl text-gray-500" />}
         {message.status === "delivered" && (
-          <BiCheckDouble className="text-xl text-blue-500" />
+          <BiCheckDouble className="text-xl text-gray-500" />
         )}
         {message.status === "read" && (
           <BiCheckDouble className="text-xl text-blue-700" />
@@ -990,7 +999,7 @@ const ChatMessage = ({
         {message.status === "error" && "Error"}
         {/* Show default status for isUser: false messages if no status is set */}
         {!message.isUser && !message.status && (
-          <BiCheckDouble className="text-xl text-gray-400" />
+          <BiCheck className="text-xl text-gray-500" />
         )}
       </div>
     </div>
@@ -1007,14 +1016,7 @@ const ChatMessage = ({
         {bubbleContent}
         {actionButtons}
       </div>
-      {/* Action Button Group for incoming messages */}
-      <div className="ml-2">
-        <ActionButtonGroup />
-      </div>
-      {/* Error Actions for incoming messages */}
-      <div className="ml-2">
-        <ErrorActions />
-      </div>
+      
     </div>
   );
 };
@@ -1494,10 +1496,7 @@ const ChatBot = ({
           <span className="font-semibold">ChatBot</span>
         </div>
         <div className="flex space-x-3">
-          <div
-            onClick={fetchMessages}
-            className="cursor-pointer"
-          >
+          <div onClick={fetchMessages} className="cursor-pointer">
             <ArrowPathIcon className="h-6 w-6 text-gray-200" />
           </div>
           <div
